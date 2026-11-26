@@ -1,0 +1,52 @@
+# ==============================================================================
+# Zenve Vet Apache Production Security Configuration (.htaccess)
+# ==============================================================================
+
+# Disable directory browsing
+Options -Indexes
+
+# 1. Deny access to .git, .svn, .hg and version control
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Block access to .git, .env, hidden files
+    RewriteRule ^\.git - [F,L]
+    RewriteRule (^|/)\.git - [F,L]
+    RewriteRule (^|/)\.svn - [F,L]
+    RewriteRule (^|/)\.env - [F,L]
+    RewriteRule (^|/)\.(?!well-known) - [F,L]
+
+    # Block path traversal attempts
+    RewriteCond %{THE_REQUEST} (\.\./|\.\.\\|\.%2e|%2e\.) [NC]
+    RewriteRule .* - [F,L]
+</IfModule>
+
+# 2. Block sensitive file types and configurations via FilesMatch
+<FilesMatch "(?i)\.(git|svn|env|sql|bak|backup|dump|tar|gz|tgz|zip|log|key|pem|crt|cer|p12|jks|db|sqlite|ini|cfg|conf|sh|bash|bat|cmd|ps1|class|java|py|dockerfile)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# 3. Block specific sensitive configuration files
+<FilesMatch "(?i)^(wp-config\.php|web\.config|credentials\.json|id_rsa|id_ed25519|database\.ya?ml)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# 4. Universal Security Headers
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>

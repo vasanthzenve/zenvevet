@@ -1,0 +1,24 @@
+{
+  "name": "Zenve Vet — Professional Veterinary Network",
+  "short_name": "Zenve Vet",
+  "description": "Unified clinical network for veterinary surgeons, practitioners, and clinical cases.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#064E3B",
+  "theme_color": "#0D472B",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/zenve_logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/zenve_logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zenve-vet-ingress
+  namespace: zenve-vet
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/proxy-body-size: "60m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "15"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/websocket-services: "zenve-vet-backend-svc"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/affinity-mode: "persistent"
+    nginx.ingress.kubernetes.io/session-cookie-name: "ZENVE_AFFINITY"
+spec:
+  tls:
+  - hosts:
+    - zenvevet.com
+    - api.zenvevet.com
+    secretName: zenve-tls-secret
+  rules:
+  - host: zenvevet.com
+    http:
+      paths:
+      - path: /api/
+        pathType: Prefix
+        backend:
+          service:
+            name: zenve-vet-backend-svc
+            port:
+              number: 8080
+      - path: /ws/
+        pathType: Prefix
+        backend:
+          service:
+            name: zenve-vet-backend-svc
+            port:
+              number: 8080
+      - path: /ws-chat/
+        pathType: Prefix
+        backend:
+          service:
+            name: zenve-vet-backend-svc
+            port:
+              number: 8080
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: zenve-vet-frontend-svc
+            port:
+              number: 80
+

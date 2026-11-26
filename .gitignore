@@ -1,0 +1,119 @@
+# ==============================================================================
+# Zenve Vet Enterprise .gitignore & Secret Exclusion Configuration
+# Prevents accidental repository commits of credentials, backups, and metadata
+# ==============================================================================
+
+# 1. Environment & Secret Configuration Files
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+credentials.json
+**/credentials.json
+service-account*.json
+**/service-account*.json
+jwt-secret*.txt
+secret*.txt
+master.key
+
+# 2. Database Dumps & SQL Backups
+*.sql
+*.dump
+*.dmp
+*.sqlite
+*.sqlite3
+*.db
+**/*.sql
+**/*.dump
+**/*.db
+
+# 3. Backup Files, Temporary & Editor Swaps
+*.bak
+*.backup
+*.old
+*.orig
+*.save
+*.swp
+*.swo
+*~
+*.tmp
+
+# 4. Compressed Archives & Backup Tarballs
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar
+*.bz2
+
+# 5. Cryptographic Keys, Certificates & Keystores
+*.key
+*.pem
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# 6. Log Files & Crash Reports
+*.log
+**/*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.hprof
+hs_err_pid*
+
+# 7. User-Uploaded Media & Directories
+uploads/
+**/uploads/
+server/uploads/
+
+# 8. Build Artifacts & Compiled Binaries
+dist/
+build/
+target/
+*.class
+*.jar
+*.war
+
+# 9. Dependencies & Package Managers
+node_modules/
+**/node_modules/
+venv/
+**/venv/
+.pnpm-store/
+
+# 10. OS & IDE Metadata
+.DS_Store
+**/.DS_Store
+Thumbs.db
+.idea/
+**/.idea/
+.vscode/
+**/.vscode/
+*.iml
+*.ipr
+*.iws
+
+# 11. Python Cache
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# 12. Build Output Git Exclusion (Never deploy .git in distribution)
+dist/.git
+dist/.git/**
+build/.git
+build/.git/**
+target/.git
+target/.git/**
+
+# 13. Compiler & Migration Temporary Files
+javac_args.txt
+**/javac_args.txt
+replace.txt
+

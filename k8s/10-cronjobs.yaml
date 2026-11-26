@@ -1,0 +1,51 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: zenve-abandoned-upload-cleanup
+  namespace: zenve-vet
+spec:
+  schedule: "0 2 * * *" # Daily at 02:00 AM UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: cleanup
+            image: alpine:3.19
+            command:
+            - /bin/sh
+            - -c
+            - "find /var/www/uploads/ -type f -name 'tmp_*' -mtime +1 -delete && echo 'Purged abandoned temporary files'"
+            volumeMounts:
+            - name: uploads-volume
+              mountPath: /var/www/uploads
+          volumes:
+          - name: uploads-volume
+            persistentVolumeClaim:
+              claimName: zenve-uploads-pvc
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: zenve-daily-analytics-aggregator
+  namespace: zenve-vet
+spec:
+  schedule: "0 0 * * *" # Daily at midnight UTC
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: analytics-trigger
+            image: curlimages/curl:8.6.0
+            command:
+            - /bin/sh
+            - -c
+            - "curl -X POST http://zenve-vet-backend-svc.zenve-vet.svc.cluster.local:8080/api/v1/analytics/aggregate"
+

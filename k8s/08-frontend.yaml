@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zenve-vet-frontend
+  namespace: zenve-vet
+  labels:
+    app: zenve-vet-frontend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: zenve-vet-frontend
+  template:
+    metadata:
+      labels:
+        app: zenve-vet-frontend
+    spec:
+      containers:
+      - name: frontend
+        image: zenve-vet-frontend:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+          name: http
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "1000m"
+            memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zenve-vet-frontend-svc
+  namespace: zenve-vet
+  labels:
+    app: zenve-vet-frontend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 80
+    name: http
+  selector:
+    app: zenve-vet-frontend
+

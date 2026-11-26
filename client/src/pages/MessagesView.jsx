@@ -1,0 +1,2613 @@
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import {
+  Users,
+  Search,
+  Send,
+  Paperclip,
+  Check,
+  CheckCheck,
+  ChevronRight,
+  ChevronDown,
+  User,
+  ShieldCheck,
+  Image as ImageIcon,
+  Video,
+  X,
+  Lock,
+  MessageSquare,
+  ArrowRight,
+  ArrowLeft,
+  UserCheck,
+  UserPlus,
+  Sparkles,
+  Shield,
+  Volume2,
+  VolumeX,
+  Play,
+  Clock
+} from 'lucide-react';
+import { Avatar } from '../components/Avatar';
+import { api } from '../services/api';
+import { showZenveAlert } from '../components/ZenveAlertModal';
+import { ALL_REACTIONS } from '../data/reactions';
+
+const resolveReaction = (raw) => {
+  if (!raw) return { isIcon: false, emoji: '❤️', label: 'Reaction' };
+  const str = String(raw).trim();
+  const lower = str.toLowerCase();
+
+  // Find by exact label, id, key, or substring match
+  const match = ALL_REACTIONS.find(r => {
+    if (!r) return false;
+    const rLabel = String(r.label || '').toLowerCase();
+    const rId = String(r.id || '').toLowerCase();
+    const rKey = String(r.key || '').toLowerCase();
+    return (
+      rLabel === lower ||
+      rId === lower ||
+      rKey === lower ||
+      lower.includes(rLabel) ||
+      rLabel.includes(lower) ||
+      lower.replace(/\s+/g, '_') === rId ||
+      lower.replace(/_+/g, ' ') === rLabel
+    );
+  });
+
+  if (match) {
+    return {
+      isIcon: true,
+      icon: match.icon,
+      label: match.label,
+      color: match.color || '#F59E0B'
+    };
+  }
+
+  // Fallback for standard unicode emojis (e.g. ❤️, 🔥, 👏, 😮, 😂, 🩺, 🐾)
+  return {
+    isIcon: false,
+    emoji: str,
+    label: str
+  };
+};
+
+const resolveMediaUrl = (url) => {
+  if (!url) return '';
+  let str = String(url).trim();
+  if (!str) return '';
+  if (str.startsWith('data:') || str.startsWith('blob:')) return str;
+  if (str.includes('/uploads/')) {
+    const uploadIndex = str.indexOf('/uploads/');
+    return str.substring(uploadIndex);
+  }
+  if (str.startsWith('uploads/')) return `/${str}`;
+  return str;
+};
+
+const isVideoAttachment = (url, type) => {
+  if (type && String(type).toUpperCase() === 'VIDEO') return true;
+  if (!url) return false;
+  const clean = String(url).split('?')[0].toLowerCase();
+  return clean.endsWith('.mp4') || clean.endsWith('.webm') || clean.endsWith('.mov') || clean.endsWith('.ogg') || clean.endsWith('.m4v') || clean.startsWith('data:video');
+};
+
+function ChatMessageMedia({ url, type }) {
+  const mediaUrl = resolveMediaUrl(url);
+  const detectedVideo = isVideoAttachment(mediaUrl, type);
+  const [mode, setMode] = useState(detectedVideo ? 'video' : 'image');
+  const [hasTriedVideo, setHasTriedVideo] = useState(detectedVideo);
+
+  useEffect(() => {
+    const isVid = isVideoAttachment(mediaUrl, type);
+    setMode(isVid ? 'video' : 'image');
+    setHasTriedVideo(isVid);
+  }, [mediaUrl, type]);
+
+  if (!mediaUrl) return null;
+
+  return (
+    <div style={{
+      borderRadius: '12px',
+      overflow: 'hidden',
+      marginBottom: '8px',
+      backgroundColor: '#07180F',
+      position: 'relative',
+      maxWidth: '100%',
+      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.12)'
+    }}>
+      {mode === 'video' ? (
+        <video
+          src={mediaUrl}
+          controls
+          playsInline
+          preload="metadata"
+          onError={() => {
+            if (!hasTriedVideo) {
+              setHasTriedVideo(true);
+              setMode('image');
+            } else {
+              setMode('fallback');
+            }
+          }}
+          style={{
+            width: '100%',
+            maxHeight: '260px',
+            display: 'block',
+            backgroundColor: '#000000',
+            borderRadius: '12px'
+          }}
+        />
+      ) : mode === 'image' ? (
+        <img
+          src={mediaUrl}
+          alt=""
+          loading="lazy"
+          onError={() => {
+            if (!hasTriedVideo) {
+              setHasTriedVideo(true);
+              setMode('video');
+            } else {
+              setMode('fallback');
+            }
+          }}
+          style={{
+            width: '100%',
+            maxHeight: '260px',
+            objectFit: 'cover',
+            display: 'block',
+            borderRadius: '12px',
+            cursor: 'pointer'
+          }}
+          onClick={() => window.open(mediaUrl, '_blank', 'noopener,noreferrer')}
+          title="Click to view full image"
+        />
+      ) : (
+        <div style={{
+          padding: '10px 14px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          backgroundColor: 'rgba(0, 0, 0, 0.35)',
+          borderRadius: '12px',
+          fontSize: '12px',
+          color: '#E5E7EB'
+        }}>
+          <Video size={18} color="#34D399" style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+            <div style={{ fontWeight: 600, fontSize: '12px', color: '#FFFFFF' }}>
+              Clinical Media Attachment
+            </div>
+            <a
+              href={mediaUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                color: '#6EE7B7',
+                textDecoration: 'underline',
+                fontSize: '11px',
+                display: 'inline-block',
+                maxWidth: '100%',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              Open media link
+            </a>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const parseStoryMessage = (text) => {
+  if (!text) return null;
+  const str = String(text).trim();
+
+  // Pattern 1: Reaction (e.g. "Reacted with 👏 to your story" or "Reacted 👏 to your story")
+  const reactionMatch = str.match(/^Reacted with\s+([\s\S]+?)\s+to\s+(your|their)\s+story/i) ||
+    str.match(/^Reacted\s+([\s\S]+?)\s+to\s+(your|their)\s+story/i);
+  if (reactionMatch) {
+    return {
+      type: 'STORY_REACTION',
+      emoji: reactionMatch[1].trim(),
+      target: reactionMatch[2].toLowerCase()
+    };
+  }
+
+  // Pattern 2: Reply (e.g. 'Replied to your story: "Hello doctor"' or 'Replied to your story: Hello')
+  const replyMatch = str.match(/^Replied to (your|their) story:\s*([\s\S]*)$/i);
+  if (replyMatch) {
+    let cleanReply = replyMatch[2].trim();
+    if ((cleanReply.startsWith('"') && cleanReply.endsWith('"')) || (cleanReply.startsWith('“') && cleanReply.endsWith('”'))) {
+      cleanReply = cleanReply.slice(1, -1).trim();
+    }
+    return {
+      type: 'STORY_REPLY',
+      replyText: cleanReply || 'Replied to your story',
+      target: replyMatch[1].toLowerCase()
+    };
+  }
+
+  // Pattern 3: Shared story (e.g. 'Shared a 24h story by Dr. Name...')
+  const shareMatch = str.match(/^Shared a 24h story by Dr\.\s*([^:\n]+)/i);
+  if (shareMatch) {
+    const lines = str.split('\n');
+    let caption = '';
+    for (let i = 1; i < lines.length; i++) {
+      if (!lines[i].startsWith('http')) {
+        caption += (caption ? ' ' : '') + lines[i].replace(/^["“]|["”]$/g, '').trim();
+      }
+    }
+    return {
+      type: 'STORY_SHARE',
+      doctorName: shareMatch[1].trim(),
+      caption: caption || ''
+    };
+  }
+
+  return null;
+};
+
+function StoryDirectMessage({
+  parsed,
+  attachmentUrl,
+  attachmentType,
+  isMe,
+  onOpenStory,
+  stories = [],
+  currentDoctor = null,
+  currentUser = null,
+  msg = null
+}) {
+  const mediaUrl = resolveMediaUrl(attachmentUrl);
+  const isVid = isVideoAttachment(mediaUrl, attachmentType);
+  const [videoMuted, setVideoMuted] = useState(true);
+
+  const normalizeUrl = (u) => String(u || '').split('?')[0].replace(/^https?:\/\/[^\/]+/, '').replace(/^\/+/, '').trim().toLowerCase();
+
+  const targetStoryIdStr = msg?.storyId != null ? String(msg.storyId).trim() : null;
+  const cleanTargetId = targetStoryIdStr ? targetStoryIdStr.replace(/^story-/i, '') : null;
+  const targetDocId = isMe ? (currentDoctor?.id) : (msg?.senderId || currentDoctor?.id);
+  const cleanTargetDocId = targetDocId != null ? String(targetDocId).replace(/^doc-/i, '') : null;
+  const rawAtt = String(attachmentUrl || mediaUrl || '').trim();
+  const normAtt = normalizeUrl(rawAtt);
+
+  // 1. Try to find the matching story by authoritative storyId, mediaUrl, or doctor
+  const matchingStory = (stories || []).find(s => {
+    if (!s) return false;
+    const sIdStr = String(s.id || '').trim();
+    const cleanSId = sIdStr.replace(/^story-/i, '');
+
+    // Match by ID
+    if (cleanTargetId && (sIdStr === targetStoryIdStr || cleanSId === cleanTargetId)) {
+      return true;
+    }
+
+    // Match by media URL
+    if (normAtt) {
+      const sImg = normalizeUrl(s.image);
+      const sVid = normalizeUrl(s.videoUrl);
+      const sMed = normalizeUrl(s.mediaUrl);
+      if (
+        (sImg && (sImg === normAtt || sImg.endsWith(normAtt) || normAtt.endsWith(sImg))) ||
+        (sVid && (sVid === normAtt || sVid.endsWith(normAtt) || normAtt.endsWith(sVid))) ||
+        (sMed && (sMed === normAtt || sMed.endsWith(normAtt) || normAtt.endsWith(sMed)))
+      ) {
+        return true;
+      }
+    }
+
+    // Secondary match: if doctorId matches and story has media
+    if (cleanTargetDocId && s.doctorId != null) {
+      const sDocId = String(s.doctorId).replace(/^doc-/i, '');
+      if (sDocId === cleanTargetDocId && normAtt) {
+        return true;
+      }
+    }
+
+    return false;
+  });
+
+  const isStoryAvailable = Boolean(matchingStory);
+
+  // Open the interactive story viewer in StoryModal
+  const handleOpenThisStory = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    if (!onOpenStory) {
+      if (mediaUrl) window.open(mediaUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    if (matchingStory) {
+      onOpenStory(matchingStory);
+      return;
+    }
+
+    // If story has expired or been deleted
+    showZenveAlert({
+      title: 'Story Expired or Unavailable',
+      message: 'This 24-hour story has expired or is no longer available.',
+      type: 'info'
+    });
+  };
+
+  if (parsed.type === 'STORY_REACTION') {
+    const reaction = resolveReaction(parsed.emoji);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+      {/* Story Reaction Header - Clickable to open story */}
+      <div
+        onClick={handleOpenThisStory}
+        style={{
+          fontSize: '11px',
+          fontWeight: 600,
+          color: isMe ? 'rgba(255, 255, 255, 0.9)' : '#059669',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '5px',
+          marginBottom: '6px',
+          cursor: 'pointer',
+          padding: '2px 6px',
+          borderRadius: '6px',
+          transition: 'all 0.15s ease'
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isMe ? 'rgba(255, 255, 255, 0.15)' : 'rgba(5, 150, 105, 0.1)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+        title="Click to view story"
+      >
+        <Sparkles size={12} color={isMe ? '#86EFAC' : (isStoryAvailable ? '#059669' : '#9CA3AF')} />
+        <span>{isMe ? 'Reacted to their story' : 'Reacted to your story'}</span>
+        <span style={{ fontSize: '10px', opacity: 0.8, textDecoration: 'underline', marginLeft: '2px', color: isStoryAvailable ? undefined : '#EF4444' }}>
+          {isStoryAvailable ? '· View story' : '· Expired'}
+        </span>
+      </div>
+
+      {/* Vertical Story Preview Thumbnail Card with Reaction Badge */}
+      {mediaUrl ? (
+        <div
+          style={{
+            position: 'relative',
+            width: '175px',
+            height: '240px',
+            borderRadius: '16px',
+            overflow: 'hidden',
+            backgroundColor: '#05130B',
+            boxShadow: '0 6px 16px rgba(0, 0, 0, 0.22)',
+            border: isMe ? '1px solid rgba(255, 255, 255, 0.2)' : '1px solid #E5E7EB',
+            opacity: isStoryAvailable ? 1 : 0.82,
+            filter: isStoryAvailable ? 'none' : 'grayscale(35%)',
+            cursor: 'pointer',
+            marginBottom: '4px',
+            transition: 'transform 0.15s ease, box-shadow 0.15s ease'
+          }}
+          onClick={handleOpenThisStory}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'scale(1.02)';
+            e.currentTarget.style.boxShadow = '0 8px 22px rgba(0, 0, 0, 0.3)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.boxShadow = '0 6px 16px rgba(0, 0, 0, 0.22)';
+          }}
+          title={isStoryAvailable ? "Click to view story" : "Story expired or unavailable"}
+        >
+          {isVid ? (
+            <video
+              src={mediaUrl}
+              autoPlay
+              loop
+              muted={videoMuted}
+              playsInline
+              preload="metadata"
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                display: 'block',
+                backgroundColor: '#000000'
+              }}
+            />
+          ) : (
+            <img
+              src={mediaUrl}
+              alt=""
+              loading="lazy"
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                display: 'block'
+              }}
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                const next = e.currentTarget.nextElementSibling;
+                if (next) next.style.display = 'block';
+              }}
+            />
+          )}
+          {!isVid && (
+            <video
+              src={mediaUrl}
+              autoPlay
+              loop
+              muted
+              playsInline
+              style={{
+                display: 'none',
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover'
+              }}
+            />
+          )}
+
+          {/* Top pill badge */}
+          <div style={{
+            position: 'absolute',
+            top: '8px',
+            left: '8px',
+            background: isStoryAvailable ? 'rgba(0, 0, 0, 0.55)' : 'rgba(185, 28, 28, 0.85)',
+            backdropFilter: 'blur(6px)',
+            borderRadius: '9999px',
+            padding: '2px 8px',
+            fontSize: '10px',
+            fontWeight: 700,
+            color: '#FFFFFF',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            letterSpacing: '0.3px',
+            zIndex: 3
+          }}>
+            {isStoryAvailable ? (isVid ? <Video size={10} color="#34D399" /> : <ImageIcon size={10} color="#34D399" />) : <Clock size={10} color="#FCA5A5" />}
+            <span>{isStoryAvailable ? 'Story' : 'Expired'}</span>
+          </div>
+
+          {/* Video Mute Toggle */}
+          {isVid && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setVideoMuted(prev => !prev);
+              }}
+              style={{
+                position: 'absolute',
+                bottom: '8px',
+                left: '8px',
+                background: 'rgba(0, 0, 0, 0.6)',
+                backdropFilter: 'blur(4px)',
+                border: 'none',
+                borderRadius: '50%',
+                width: '24px',
+                height: '24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#FFFFFF',
+                cursor: 'pointer',
+                zIndex: 5
+              }}
+              title={videoMuted ? "Unmute video" : "Mute video"}
+            >
+              {videoMuted ? <VolumeX size={12} /> : <Volume2 size={12} />}
+            </button>
+          )}
+
+          {/* Floating Reaction Sticker Badge on Story Corner */}
+          <div
+            onClick={handleOpenThisStory}
+            style={{
+              position: 'absolute',
+              bottom: '10px',
+              right: '10px',
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              backgroundColor: '#FFFFFF',
+              border: '2px solid rgba(255, 255, 255, 0.95)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+              userSelect: 'none',
+              zIndex: 6,
+              cursor: 'pointer',
+              transition: 'transform 0.15s ease'
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.15)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+            title={reaction?.label || parsed.emoji}
+          >
+            {reaction?.isIcon ? (
+              <img
+                src={reaction.icon}
+                alt={reaction.label}
+                style={{
+                  width: '26px',
+                  height: '26px',
+                  objectFit: 'contain',
+                  display: 'block'
+                }}
+              />
+            ) : (
+              <span style={{ fontSize: '18px', lineHeight: 1 }}>{reaction?.emoji || parsed.emoji}</span>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Reaction Pill below Story Thumbnail */}
+      <div
+        onClick={handleOpenThisStory}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '6px',
+          marginTop: '6px',
+          padding: '4px 10px',
+          borderRadius: '12px',
+          backgroundColor: isMe ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.05)',
+          color: isMe ? '#FFFFFF' : '#374151',
+          fontSize: '12px',
+          fontWeight: 600,
+          cursor: 'pointer',
+          transition: 'background-color 0.15s ease'
+        }}
+        title="Click to view story"
+      >
+        {reaction?.isIcon ? (
+          <img
+            src={reaction.icon}
+            alt={reaction.label}
+            style={{ width: '18px', height: '18px', objectFit: 'contain' }}
+          />
+        ) : (
+          <span style={{ fontSize: '15px' }}>{reaction?.emoji || parsed.emoji}</span>
+        )}
+        <span>{reaction?.label || parsed.emoji}</span>
+      </div>
+    </div>
+  );
+}
+
+if (parsed.type === 'STORY_REPLY') {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+      {/* Story Reply Header - Clickable to open story */}
+      <div
+        onClick={handleOpenThisStory}
+        style={{
+          fontSize: '11px',
+          fontWeight: 600,
+          color: isMe ? 'rgba(255, 255, 255, 0.9)' : '#059669',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '5px',
+          marginBottom: '6px',
+          cursor: 'pointer',
+          padding: '2px 6px',
+          borderRadius: '6px',
+          transition: 'all 0.15s ease'
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isMe ? 'rgba(255, 255, 255, 0.15)' : 'rgba(5, 150, 105, 0.1)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+        title="Click to view story"
+      >
+        <Sparkles size={12} color={isMe ? '#86EFAC' : (isStoryAvailable ? '#059669' : '#9CA3AF')} />
+        <span>{isMe ? 'Replied to their story' : 'Replied to your story'}</span>
+        <span style={{ fontSize: '10px', opacity: 0.8, textDecoration: 'underline', marginLeft: '2px', color: isStoryAvailable ? undefined : '#EF4444' }}>
+          {isStoryAvailable ? '· View story' : '· Expired'}
+        </span>
+      </div>
+
+      {/* Embedded Story Thumbnail Preview */}
+      {mediaUrl && (
+        <div
+          style={{
+            position: 'relative',
+            width: '165px',
+            height: '210px',
+            borderRadius: '14px',
+            overflow: 'hidden',
+            backgroundColor: '#05130B',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.18)',
+            border: isMe ? '1px solid rgba(255, 255, 255, 0.2)' : '1px solid #E5E7EB',
+            opacity: isStoryAvailable ? 1 : 0.82,
+            filter: isStoryAvailable ? 'none' : 'grayscale(35%)',
+            cursor: 'pointer',
+            marginBottom: '8px',
+            transition: 'transform 0.15s ease, box-shadow 0.15s ease'
+          }}
+          onClick={handleOpenThisStory}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'scale(1.02)';
+            e.currentTarget.style.boxShadow = '0 6px 18px rgba(0, 0, 0, 0.25)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.18)';
+          }}
+          title={isStoryAvailable ? "Click to view story" : "Story expired or unavailable"}
+        >
+          {isVid ? (
+            <video
+              src={mediaUrl}
+              autoPlay
+              loop
+              muted={videoMuted}
+              playsInline
+              preload="metadata"
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                display: 'block',
+                backgroundColor: '#000000'
+              }}
+            />
+          ) : (
+            <img
+              src={mediaUrl}
+              alt=""
+              loading="lazy"
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                display: 'block'
+              }}
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                const next = e.currentTarget.nextElementSibling;
+                if (next) next.style.display = 'block';
+              }}
+            />
+          )}
+          {!isVid && (
+            <video
+              src={mediaUrl}
+              autoPlay
+              loop
+              muted
+              playsInline
+              style={{
+                display: 'none',
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover'
+              }}
+            />
+          )}
+
+          <div style={{
+            position: 'absolute',
+            top: '7px',
+            left: '7px',
+            background: isStoryAvailable ? 'rgba(0, 0, 0, 0.55)' : 'rgba(185, 28, 28, 0.85)',
+            backdropFilter: 'blur(6px)',
+            borderRadius: '9999px',
+            padding: '2px 8px',
+            fontSize: '9.5px',
+            fontWeight: 700,
+            color: '#FFFFFF',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            zIndex: 3
+          }}>
+            {isStoryAvailable ? (isVid ? <Video size={10} color="#34D399" /> : <ImageIcon size={10} color="#34D399" />) : <Clock size={10} color="#FCA5A5" />}
+            <span>{isStoryAvailable ? 'Story' : 'Expired'}</span>
+          </div>
+
+          {isVid && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setVideoMuted(prev => !prev);
+              }}
+              style={{
+                position: 'absolute',
+                bottom: '8px',
+                left: '8px',
+                background: 'rgba(0, 0, 0, 0.6)',
+                backdropFilter: 'blur(4px)',
+                border: 'none',
+                borderRadius: '50%',
+                width: '24px',
+                height: '24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#FFFFFF',
+                cursor: 'pointer',
+                zIndex: 5
+              }}
+              title={videoMuted ? "Unmute video" : "Mute video"}
+            >
+              {videoMuted ? <VolumeX size={12} /> : <Volume2 size={12} />}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* User's typed Reply text */}
+      <p style={{
+        margin: 0,
+        fontSize: '14px',
+        lineHeight: 1.45,
+        fontWeight: 500,
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        color: isMe ? '#FFFFFF' : '#1F2937'
+      }}>
+        {parsed.replyText}
+      </p>
+    </div>
+  );
+}
+
+if (parsed.type === 'STORY_SHARE') {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+      <div
+        onClick={handleOpenThisStory}
+        style={{
+          fontSize: '11px',
+          fontWeight: 600,
+          color: isMe ? 'rgba(255, 255, 255, 0.9)' : '#059669',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '5px',
+          marginBottom: '6px',
+          cursor: 'pointer',
+          padding: '2px 6px',
+          borderRadius: '6px',
+          transition: 'all 0.15s ease'
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isMe ? 'rgba(255, 255, 255, 0.15)' : 'rgba(5, 150, 105, 0.1)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+        title="Click to view story"
+      >
+        <Sparkles size={12} color={isMe ? '#86EFAC' : (isStoryAvailable ? '#059669' : '#9CA3AF')} />
+        <span>Shared Dr. {parsed.doctorName}'s 24h story</span>
+        <span style={{ fontSize: '10px', opacity: 0.8, textDecoration: 'underline', marginLeft: '2px', color: isStoryAvailable ? undefined : '#EF4444' }}>
+          {isStoryAvailable ? '· View story' : '· Expired'}
+        </span>
+      </div>
+
+      {mediaUrl && (
+        <div
+          style={{
+            position: 'relative',
+            width: '175px',
+            height: '230px',
+            borderRadius: '14px',
+            overflow: 'hidden',
+            backgroundColor: '#05130B',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.18)',
+            border: isMe ? '1px solid rgba(255, 255, 255, 0.2)' : '1px solid #E5E7EB',
+            opacity: isStoryAvailable ? 1 : 0.82,
+            filter: isStoryAvailable ? 'none' : 'grayscale(35%)',
+            cursor: 'pointer',
+            marginBottom: parsed.caption ? '6px' : '0',
+            transition: 'transform 0.15s ease, box-shadow 0.15s ease'
+          }}
+          onClick={handleOpenThisStory}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'scale(1.02)';
+            e.currentTarget.style.boxShadow = '0 6px 18px rgba(0, 0, 0, 0.25)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+            e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.18)';
+          }}
+          title={isStoryAvailable ? "Click to view story" : "Story expired or unavailable"}
+        >
+          {isVid ? (
+            <video
+              src={mediaUrl}
+              autoPlay
+              loop
+              muted={videoMuted}
+              playsInline
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          ) : (
+            <img
+              src={mediaUrl}
+              alt=""
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          )}
+          <div style={{
+            position: 'absolute',
+            top: '7px',
+            left: '7px',
+            background: isStoryAvailable ? 'rgba(0, 0, 0, 0.55)' : 'rgba(185, 28, 28, 0.85)',
+            backdropFilter: 'blur(6px)',
+            borderRadius: '9999px',
+            padding: '2px 8px',
+            fontSize: '9.5px',
+            fontWeight: 700,
+            color: '#FFFFFF',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            zIndex: 3
+          }}>
+            {isStoryAvailable ? (isVid ? <Video size={10} color="#34D399" /> : <ImageIcon size={10} color="#34D399" />) : <Clock size={10} color="#FCA5A5" />}
+            <span>{isStoryAvailable ? 'Story' : 'Expired'}</span>
+          </div>
+        </div>
+      )}
+
+      {parsed.caption && (
+        <p style={{
+          margin: '4px 0 0 0',
+          fontSize: '13px',
+          lineHeight: 1.4,
+          fontStyle: 'italic',
+          opacity: 0.95
+        }}>
+          "{parsed.caption}"
+        </p>
+      )}
+    </div>
+  );
+}
+
+return null;
+}
+
+// Robust parser for date/time stored by backend or local client, converting accurately to user local Date
+const parseUtcDate = (t) => {
+  if (!t) return null;
+  if (t instanceof Date) return isNaN(t.getTime()) ? null : t;
+  if (typeof t === 'number') {
+    const d = new Date(t);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  let str = String(t).trim();
+  if (!str || str === 'null' || str === 'undefined') return null;
+  if (str.includes(' ') && !str.includes('T')) {
+    str = str.replace(' ', 'T');
+  }
+  // Trim sub-millisecond nanoseconds for clean cross-browser parsing (e.g. .123456789 -> .123)
+  str = str.replace(/(\.\d{3})\d+/, '$1');
+  // Note: Backend stores LocalDateTime in system local time; ISO strings without 'Z' are parsed directly
+  // as local date-time by standard ECMAScript Date parsing.
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+};
+
+// Format real-time message timestamp (e.g. 12:20 PM)
+const formatTime = (t) => {
+  if (!t || t === 'null' || t === 'undefined') return 'Just now';
+  if (typeof t === 'string') {
+    const s = t.trim();
+    if (!s || s === 'null' || s === 'undefined') return 'Just now';
+    if (s.toLowerCase() === 'just now' || s.toLowerCase() === 'active') return s;
+    if (/^\d{1,2}:\d{2}(\s*(?:am|pm))?$/i.test(s)) return s;
+  }
+  try {
+    const d = parseUtcDate(t);
+    if (d) {
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+  } catch (e) { }
+  return String(t);
+};
+
+// Format conversation list timestamp (e.g. 12:20 PM, Yesterday, 25 Oct)
+const formatConversationTime = (t) => {
+  if (!t) return 'Active';
+  if (typeof t === 'string') {
+    const s = t.trim();
+    if (s.toLowerCase() === 'just now' || s.toLowerCase() === 'active' || s.toLowerCase() === 'connected') return s;
+    if (/^\d{1,2}:\d{2}(\s*(?:am|pm))?$/i.test(s)) return s;
+  }
+  try {
+    const d = parseUtcDate(t);
+    if (d) {
+      const now = new Date();
+      if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+      const yesterday = new Date(now);
+      yesterday.setDate(now.getDate() - 1);
+      if (d.getFullYear() === yesterday.getFullYear() && d.getMonth() === yesterday.getMonth() && d.getDate() === yesterday.getDate()) {
+        return 'Yesterday';
+      }
+      if (d.getFullYear() === now.getFullYear()) {
+        return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      }
+      return d.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+    }
+  } catch (e) { }
+  return String(t);
+};
+
+// Helper to format date divider badge (e.g. "Today", "Yesterday", "Wed, Oct 27")
+const formatDateDivider = (t) => {
+  if (!t) return null;
+  try {
+    const d = parseUtcDate(t);
+    if (d) {
+      const now = new Date();
+      if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
+        return 'Today';
+      }
+      const yesterday = new Date(now);
+      yesterday.setDate(now.getDate() - 1);
+      if (d.getFullYear() === yesterday.getFullYear() && d.getMonth() === yesterday.getMonth() && d.getDate() === yesterday.getDate()) {
+        return 'Yesterday';
+      }
+      return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+    }
+  } catch (e) { }
+  return null;
+};
+
+export function MessagesView({
+  conversations = [],
+  activeChatDoctor = null,
+  onSelectConversation,
+  onSendMessage,
+  onOpenDoctorProfile,
+  currentUser = null,
+  doctors = [],
+  connectedDoctors = [],
+  onOpenLogin,
+  onNavigateTab,
+  onOpenCreateProfile,
+  onSendRequest,
+  onMarkAsRead,
+  onOpenStory,
+  stories = []
+}) {
+  const [messageText, setMessageText] = useState('');
+  const [attachmentUrl, setAttachmentUrl] = useState('');
+  const [attachmentType, setAttachmentType] = useState('IMAGE');
+  const [isSending, setIsSending] = useState(false);
+  const sendingLockRef = useRef(false);
+  const [searchPersonQuery, setSearchPersonQuery] = useState('');
+
+  const messagesContainerRef = useRef(null);
+  const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const isAtBottomRef = useRef(true);
+  const prevChatDoctorIdRef = useRef(null);
+  const prevMessagesCountRef = useRef(0);
+  const userJustSentRef = useRef(false);
+  const [showScrollBottomBtn, setShowScrollBottomBtn] = useState(false);
+  const [newMessagesWhileScrolled, setNewMessagesWhileScrolled] = useState(0);
+
+  // Helper to scroll smoothly or immediately to bottom of messages container
+  const scrollToBottom = useCallback((behavior = 'smooth') => {
+    const el = messagesContainerRef.current;
+    if (el) {
+      if (behavior === 'auto') {
+        el.scrollTop = el.scrollHeight;
+      } else {
+        el.scrollTo({
+          top: el.scrollHeight,
+          behavior: 'smooth'
+        });
+      }
+      isAtBottomRef.current = true;
+      setShowScrollBottomBtn(false);
+      setNewMessagesWhileScrolled(0);
+    } else if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior });
+    }
+  }, []);
+
+  // Monitor user scroll position: if within 100px of bottom, consider user "at bottom"
+  const handleScroll = useCallback(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const threshold = 100;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const atBottom = distanceFromBottom <= threshold;
+    isAtBottomRef.current = atBottom;
+
+    if (atBottom) {
+      setShowScrollBottomBtn(false);
+      setNewMessagesWhileScrolled(0);
+    } else {
+      setShowScrollBottomBtn(true);
+    }
+  }, []);
+
+  // Mobile view state: toggle between chat and contacts list on mobile
+  const [mobileShowChat, setMobileShowChat] = useState(!!activeChatDoctor);
+
+  useEffect(() => {
+    if (activeChatDoctor) {
+      setMobileShowChat(true);
+    }
+  }, [activeChatDoctor]);
+
+  // =========================================================================
+  // 1. SIGNED-OUT STATE: SECURE GATE RENDER FUNCTION
+  // =========================================================================
+  const renderSignedOutGate = () => (
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '100%',
+        minHeight: 'calc(100vh - 130px)',
+        backgroundColor: '#FFFFFF',
+        borderRadius: '24px',
+        boxShadow: '0 4px 24px rgba(0, 45, 25, 0.04)',
+        border: '1px solid #E5E7EB',
+        padding: '50px 24px',
+        boxSizing: 'border-box',
+        textAlign: 'center'
+      }}>
+        <div style={{ maxWidth: '640px', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+
+          {/* Branded Security Lock Icon */}
+          <div style={{
+            position: 'relative',
+            width: '84px',
+            height: '84px',
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, #003822 0%, #0D4B2D 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 8px 24px rgba(0, 56, 34, 0.22)',
+            marginBottom: '22px'
+          }}>
+            <Lock size={38} color="#A7F3D0" strokeWidth={2.2} />
+            <span style={{
+              position: 'absolute',
+              bottom: '-2px',
+              right: '-2px',
+              backgroundColor: '#10B981',
+              borderRadius: '50%',
+              padding: '6px',
+              border: '3px solid #FFFFFF',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <Shield size={14} color="#FFFFFF" strokeWidth={2.5} />
+            </span>
+          </div>
+
+          {/* Privacy Badge */}
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '5px 14px',
+            borderRadius: '9999px',
+            backgroundColor: '#EDF8F2',
+            border: '1px solid #A4DFBE',
+            fontSize: '11.5px',
+            fontWeight: 700,
+            color: '#0B6B3F',
+            marginBottom: '14px',
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase'
+          }}>
+            <ShieldCheck size={14} color="#0B6B3F" />
+            <span>End-to-End Encrypted Doctor Communications</span>
+          </div>
+
+          {/* Main Headline */}
+          <h2 style={{
+            margin: '0 0 12px 0',
+            fontSize: '28px',
+            fontWeight: 800,
+            color: '#111827',
+            letterSpacing: '-0.02em',
+            lineHeight: 1.25
+          }}>
+            Sign in to view your messages & consultations
+          </h2>
+
+          {/* Subtext */}
+          <p style={{
+            margin: '0 0 28px 0',
+            fontSize: '14.5px',
+            color: '#4B5563',
+            lineHeight: 1.6,
+            maxWidth: '560px'
+          }}>
+            Direct clinical peer discussions, surgical consults, and diagnostic scans are strictly private to authenticated veterinary professionals.
+          </p>
+
+          {/* 3 Pillar Value Cards */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: '14px',
+            width: '100%',
+            marginBottom: '32px'
+          }}>
+            <div style={{
+              backgroundColor: '#F9FAFB',
+              border: '1px solid #E5E7EB',
+              borderRadius: '16px',
+              padding: '16px 14px',
+              textAlign: 'left'
+            }}>
+              <div style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                backgroundColor: '#EDF8F2',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '10px'
+              }}>
+                <MessageSquare size={17} color="#0D4B2D" />
+              </div>
+              <h4 style={{ margin: '0 0 4px 0', fontSize: '13px', fontWeight: 700, color: '#111827' }}>
+                Peer Consults
+              </h4>
+              <p style={{ margin: 0, fontSize: '11.5px', color: '#6B7280', lineHeight: 1.45 }}>
+                Direct 1-on-1 consultations with veterinary surgeons & specialists.
+              </p>
+            </div>
+
+            <div style={{
+              backgroundColor: '#F9FAFB',
+              border: '1px solid #E5E7EB',
+              borderRadius: '16px',
+              padding: '16px 14px',
+              textAlign: 'left'
+            }}>
+              <div style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                backgroundColor: '#EDF8F2',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '10px'
+              }}>
+                <ImageIcon size={17} color="#0D4B2D" />
+              </div>
+              <h4 style={{ margin: '0 0 4px 0', fontSize: '13px', fontWeight: 700, color: '#111827' }}>
+                Case Scans
+              </h4>
+              <p style={{ margin: 0, fontSize: '11.5px', color: '#6B7280', lineHeight: 1.45 }}>
+                Share radiographs, ECG strips, and histopathology files safely.
+              </p>
+            </div>
+
+            <div style={{
+              backgroundColor: '#F9FAFB',
+              border: '1px solid #E5E7EB',
+              borderRadius: '16px',
+              padding: '16px 14px',
+              textAlign: 'left'
+            }}>
+              <div style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                backgroundColor: '#EDF8F2',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '10px'
+              }}>
+                <Users size={17} color="#0D4B2D" />
+              </div>
+              <h4 style={{ margin: '0 0 4px 0', fontSize: '13px', fontWeight: 700, color: '#111827' }}>
+                Verified Network
+              </h4>
+              <p style={{ margin: 0, fontSize: '11.5px', color: '#6B7280', lineHeight: 1.45 }}>
+                Chat exclusively with verified veterinary professionals and alumni.
+              </p>
+            </div>
+          </div>
+
+          {/* Action CTAs */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '24px' }}>
+            <button
+              onClick={() => onOpenLogin && onOpenLogin()}
+              style={{
+                backgroundColor: '#003822',
+                color: '#FFFFFF',
+                border: 'none',
+                borderRadius: '9999px',
+                padding: '13px 32px',
+                fontSize: '14.5px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 14px rgba(0, 56, 34, 0.25)',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#0D4B2D';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#003822';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
+            >
+              <span>Sign In to Zenve Vet</span>
+              <ArrowRight size={17} />
+            </button>
+
+            <button
+              onClick={() => onOpenCreateProfile ? onOpenCreateProfile() : onOpenLogin && onOpenLogin()}
+              style={{
+                backgroundColor: '#FFFFFF',
+                color: '#003822',
+                border: '1.5px solid #003822',
+                borderRadius: '9999px',
+                padding: '12px 26px',
+                fontSize: '14px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#F0FDF4';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#FFFFFF';
+              }}
+            >
+              <UserCheck size={16} />
+              <span>Join as a Doctor</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+
+  // =========================================================================
+  // 2. AUTHENTICATED STATE: FULL PEER CONSULTATION EXPERIENCE
+  // =========================================================================
+
+  // Resolve user's actual connections strictly - enriched with live doctor catalog
+  const userConnections = useMemo(() => {
+    return (connectedDoctors || []).map(p => {
+      const fresh = (doctors || []).find(d =>
+        d.id === p.id ||
+        String(d.id).replace('doc-', '') === String(p.id).replace('doc-', '') ||
+        (d.name && p.name && d.name.toLowerCase().replace(/^dr\.?\s*/i, '').trim() === p.name.toLowerCase().replace(/^dr\.?\s*/i, '').trim())
+      );
+      return fresh ? { ...p, ...fresh, avatar: fresh.avatar || p.avatar } : p;
+    });
+  }, [connectedDoctors, doctors]);
+
+  // Merge conversations and connected doctors, prioritizing unread chats first
+  const allContacts = useMemo(() => {
+    const map = new Map();
+
+    // 1. Existing conversations first (with fresh doctor info)
+    (conversations || []).forEach(conv => {
+      if (conv.doctor) {
+        const fresh = (doctors || []).find(d =>
+          d.id === conv.doctor.id ||
+          String(d.id).replace('doc-', '') === String(conv.doctor.id).replace('doc-', '') ||
+          (d.name && conv.doctor.name && d.name.toLowerCase().replace(/^dr\.?\s*/i, '').trim() === conv.doctor.name.toLowerCase().replace(/^dr\.?\s*/i, '').trim())
+        );
+        const resolvedDoctor = fresh ? { ...conv.doctor, ...fresh, avatar: fresh.avatar || conv.doctor.avatar } : conv.doctor;
+        const key = resolvedDoctor.id ? String(resolvedDoctor.id).replace('doc-', '') : resolvedDoctor.name;
+
+        const lastConvMsg = conv.messages && conv.messages.length > 0 ? conv.messages[conv.messages.length - 1] : null;
+        const convDisplayTime = formatConversationTime(lastConvMsg?.createdAt || lastConvMsg?.time || conv.timestamp);
+
+        map.set(key, {
+          doctor: resolvedDoctor,
+          conv: conv,
+          lastMessage: conv.lastMessage || (lastConvMsg ? lastConvMsg.text : 'Direct chat consultation'),
+          timestamp: convDisplayTime,
+          unread: conv.unread || 0
+        });
+      }
+    });
+
+    // 2. Add connected doctors who might not have had messages yet
+    (userConnections || []).forEach(doc => {
+      const key = doc.id ? String(doc.id).replace('doc-', '') : doc.name;
+      if (!map.has(key)) {
+        map.set(key, {
+          doctor: doc,
+          conv: null,
+          lastMessage: doc.specialty || 'Veterinary Practitioner',
+          timestamp: 'Connected',
+          unread: 0
+        });
+      }
+    });
+
+    const list = Array.from(map.values());
+    // Sort: unread chats at the very top, then active chats, then connected
+    return list.sort((a, b) => {
+      const unreadDiff = (b.unread || 0) - (a.unread || 0);
+      if (unreadDiff !== 0) return unreadDiff;
+      if (b.conv && !a.conv) return 1;
+      if (a.conv && !b.conv) return -1;
+      return 0;
+    });
+  }, [conversations, userConnections, doctors, currentUser]);
+
+
+
+  // Filter contacts by search query
+  const filteredContacts = allContacts.filter(item => {
+    if (!searchPersonQuery.trim()) return true;
+    const q = searchPersonQuery.toLowerCase();
+    const doc = item.doctor;
+    return (doc.name && doc.name.toLowerCase().includes(q)) ||
+      (doc.specialty && doc.specialty.toLowerCase().includes(q)) ||
+      (item.lastMessage && item.lastMessage.toLowerCase().includes(q));
+  });
+
+  // Selected conversation strictly belonging to this user - NEVER fall back to another doctor's chat!
+  const selectedConv = useMemo(() => {
+    if (activeChatDoctor) {
+      const activeDocIdStr = String(activeChatDoctor.id || '').replace(/\D/g, '');
+      return conversations.find(c => {
+        if (!c.doctor) return false;
+        const cDocIdStr = String(c.doctor.id || '').replace(/\D/g, '');
+        return (cDocIdStr && activeDocIdStr && cDocIdStr === activeDocIdStr) ||
+          (c.doctor.name && activeChatDoctor.name && c.doctor.name.toLowerCase().trim() === activeChatDoctor.name.toLowerCase().trim());
+      }) || null;
+    }
+    return conversations.length > 0 ? conversations[0] : null;
+  }, [conversations, activeChatDoctor]);
+
+  // Track browser window focus and document visibility
+  const [isWindowActive, setIsWindowActive] = useState(() =>
+    typeof document !== 'undefined' ? (!document.hidden && document.hasFocus()) : true
+  );
+
+  useEffect(() => {
+    const updateActiveState = () => {
+      setIsWindowActive(!document.hidden && document.hasFocus());
+    };
+    const handleVisibility = () => updateActiveState();
+    const handleFocus = () => updateActiveState();
+    const handleBlur = () => setIsWindowActive(false);
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('blur', handleBlur);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, []);
+
+  // Mark conversation as read only when active conversation is visible and focused
+  useEffect(() => {
+    if (!isWindowActive || !selectedConv) return;
+
+    // Check if there are any unread messages sent by peer to currentUser
+    const hasUnreadReceived = (selectedConv.messages || []).some(m =>
+      (m.senderId !== currentUser?.id && m.sender !== 'user' && m.sender !== 'me') &&
+      (!m.isRead || m.status !== 'SEEN')
+    );
+
+    if (selectedConv.unread > 0 || hasUnreadReceived) {
+      if (onMarkAsRead && selectedConv.id) {
+        onMarkAsRead(selectedConv.id);
+      } else if (onSelectConversation) {
+        onSelectConversation(selectedConv);
+      }
+    }
+  }, [selectedConv?.id, selectedConv?.unread, selectedConv?.messages, isWindowActive, onMarkAsRead, onSelectConversation, currentUser?.id]);
+
+  // Active doctor peer for consultation - dynamically resolved from live doctor catalog
+  const rawDoctor = activeChatDoctor || selectedConv?.doctor || null;
+  const currentDoctor = useMemo(() => {
+    if (!rawDoctor) return null;
+    const fresh = (doctors || []).find(d =>
+      d.id === rawDoctor.id ||
+      String(d.id).replace('doc-', '') === String(rawDoctor.id).replace('doc-', '') ||
+      (d.name && rawDoctor.name && d.name.toLowerCase().replace(/^dr\.?\s*/i, '').trim() === rawDoctor.name.toLowerCase().replace(/^dr\.?\s*/i, '').trim())
+    );
+    return fresh ? { ...rawDoctor, ...fresh, avatar: fresh.avatar || rawDoctor.avatar } : rawDoctor;
+  }, [rawDoctor, doctors]);
+
+  // Active chat message stream (strictly isolated for active pair, deduplicated & sorted)
+  const chatMessages = useMemo(() => {
+    if (!currentDoctor) return [];
+    const list = selectedConv?.messages || [];
+    const currentDocIdStr = String(currentDoctor.id || '').replace(/\D/g, '');
+    const currentUserIdStr = String(currentUser?.id || '').replace(/\D/g, '');
+
+    const seen = new Set();
+    const result = [];
+    for (const msg of list) {
+      if (!msg) continue;
+
+      // Strict conversation data isolation:
+      // If msg specifies senderId/receiverId, verify it strictly belongs to this 1-on-1 pair
+      if (msg.senderId != null && msg.receiverId != null) {
+        const sStr = String(msg.senderId).replace(/\D/g, '');
+        const rStr = String(msg.receiverId).replace(/\D/g, '');
+        const isCurrentPair = (sStr === currentDocIdStr && rStr === currentUserIdStr) ||
+          (sStr === currentUserIdStr && rStr === currentDocIdStr);
+        if (!isCurrentPair) {
+          // Cross-conversation message detected! Filter out to preserve conversation boundary.
+          continue;
+        }
+      }
+
+      const key = msg.id != null ? String(msg.id) : (msg.clientMsgId || msg.tempId || `${msg.senderId}-${msg.createdAt}-${msg.text}`);
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push(msg);
+      }
+    }
+
+    // Sort strictly chronological: createdAt ASC, id ASC
+    result.sort((a, b) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (timeA !== timeB) return timeA - timeB;
+      const idA = typeof a.id === 'number' ? a.id : 0;
+      const idB = typeof b.id === 'number' ? b.id : 0;
+      return idA - idB;
+    });
+
+    return result;
+  }, [selectedConv?.messages, currentDoctor, currentUser?.id]);
+
+  // 1. Initial chat load / Switch conversation: instant scroll to bottom without sluggish gliding
+  useEffect(() => {
+    const doctorKey = activeChatDoctor?.id || selectedConv?.id || null;
+    if (doctorKey && doctorKey !== prevChatDoctorIdRef.current) {
+      prevChatDoctorIdRef.current = doctorKey;
+      prevMessagesCountRef.current = chatMessages.length;
+      isAtBottomRef.current = true;
+      setShowScrollBottomBtn(false);
+      setNewMessagesWhileScrolled(0);
+      requestAnimationFrame(() => {
+        scrollToBottom('auto');
+      });
+    }
+  }, [activeChatDoctor?.id, selectedConv?.id, scrollToBottom, chatMessages.length]);
+
+  // 2. Controlled auto-scroll for new messages:
+  // - NEVER scroll automatically if user is scrolled up reading earlier messages!
+  // - Scroll down ONLY if user just sent a message OR was already at the bottom.
+  useEffect(() => {
+    const prevCount = prevMessagesCountRef.current;
+    const currentCount = chatMessages.length;
+
+    if (currentCount > prevCount) {
+      const latestMsg = chatMessages[currentCount - 1];
+      const isSentByMe = latestMsg && (
+        latestMsg.sender === 'user' ||
+        latestMsg.sender === 'me' ||
+        latestMsg.senderId === currentUser?.id ||
+        (latestMsg.id && String(latestMsg.id).startsWith('temp-'))
+      );
+
+      if (userJustSentRef.current || isSentByMe) {
+        userJustSentRef.current = false;
+        requestAnimationFrame(() => scrollToBottom('smooth'));
+      } else if (isAtBottomRef.current) {
+        requestAnimationFrame(() => scrollToBottom('smooth'));
+      } else {
+        // User has scrolled up to read history -> DO NOT AUTO-SCROLL DOWN!
+        setNewMessagesWhileScrolled(prev => prev + 1);
+        setShowScrollBottomBtn(true);
+      }
+    }
+
+    prevMessagesCountRef.current = currentCount;
+  }, [chatMessages, currentUser?.id, scrollToBottom]);
+
+  // Check if current doctor is connected to allow messaging
+  const isPeerConnected = useMemo(() => {
+    if (!currentDoctor) return false;
+    const isConn = (connectedDoctors || []).some(c =>
+      c.id === currentDoctor.id ||
+      String(c.id).replace('doc-', '') === String(currentDoctor.id).replace('doc-', '') ||
+      (c.name && currentDoctor.name && c.name.toLowerCase().replace(/^dr\.?\s*/i, '').trim() === currentDoctor.name.toLowerCase().replace(/^dr\.?\s*/i, '').trim())
+    );
+    const hasConvWithMessages = (conversations || []).some(c =>
+      c.doctor && (
+        c.doctor.id === currentDoctor.id ||
+        String(c.doctor.id).replace('doc-', '') === String(currentDoctor.id).replace('doc-', '') ||
+        (c.doctor.name && currentDoctor.name && c.doctor.name.toLowerCase().replace(/^dr\.?\s*/i, '').trim() === currentDoctor.name.toLowerCase().replace(/^dr\.?\s*/i, '').trim())
+      ) && c.messages && c.messages.length > 0
+    );
+    return isConn || hasConvWithMessages;
+  }, [currentDoctor, connectedDoctors, conversations]);
+
+  // Handle Send: instant UI dispatch, duplicate prevention & smooth bottom scroll
+  const handleSend = (e) => {
+    e?.preventDefault();
+    if (sendingLockRef.current) return;
+    if (!isPeerConnected) {
+      alert(`You must connect with ${currentDoctor?.name || 'this doctor'} first before messaging.`);
+      return;
+    }
+    const trimmed = messageText.trim();
+    if (!trimmed && !attachmentUrl) return;
+
+    sendingLockRef.current = true;
+    setIsSending(true);
+    userJustSentRef.current = true;
+
+    const currentAttUrl = attachmentUrl;
+    const currentAttType = attachmentType;
+    const clientMsgId = 'cmsg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+
+    setMessageText('');
+    setAttachmentUrl('');
+    setAttachmentType('IMAGE');
+
+    if (onSendMessage) {
+      onSendMessage({
+        conversationId: (selectedConv && typeof selectedConv.id === 'number') ? selectedConv.id : null,
+        receiverId: currentDoctor?.id || 1,
+        text: trimmed,
+        attachmentUrl: currentAttUrl || null,
+        attachmentType: currentAttUrl ? (currentAttType || 'IMAGE') : null,
+        clientMsgId
+      });
+    }
+
+    requestAnimationFrame(() => {
+      scrollToBottom('smooth');
+    });
+
+    setTimeout(() => {
+      sendingLockRef.current = false;
+      setIsSending(false);
+    }, 350);
+  };
+
+  // Handle File Change (Image or Video)
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const isVid = file.type.startsWith('video/') || /\.(mp4|webm|mov|m4v|ogg)$/i.test(file.name);
+      setAttachmentType(isVid ? 'VIDEO' : 'IMAGE');
+      try {
+        const uploadRes = await api.media.upload(file);
+        if (uploadRes && uploadRes.url) {
+          setAttachmentUrl(uploadRes.url);
+          return;
+        }
+      } catch (err) {
+        console.warn('Backend file upload fallback to DataURL', err);
+      }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setAttachmentUrl(ev.target.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Quick Clinical Prompts
+  const quickPrompts = [
+    "Could you review this radiograph scan?",
+    "Available for a quick surgical case consult?",
+    "Sharing the lab biopsy report for this patient."
+  ];
+
+  if (!currentUser) {
+    return renderSignedOutGate();
+  }
+
+  return (
+    <div
+      className="messages-main-container"
+      data-mobile-view={mobileShowChat ? 'chat' : 'contacts'}
+      style={{
+        display: 'flex',
+        gap: '20px',
+        width: '100%',
+        height: 'calc(100vh - 100px)',
+        minHeight: '620px',
+        boxSizing: 'border-box'
+      }}
+    >
+      {/* ======================================================== */}
+      {/* 1. CENTER: ACTIVE CHAT CONTAINER                         */}
+      {/* ======================================================== */}
+      <div
+        className="messages-chat-pane"
+        style={{
+          flex: 1,
+          minWidth: 0,
+          backgroundColor: '#FFFFFF',
+          borderRadius: '24px',
+          boxShadow: '0 4px 20px rgba(0, 45, 25, 0.04)',
+          border: '1px solid #E5E7EB',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden'
+        }}
+      >
+        {currentDoctor ? (
+          <>
+            {/* Chat Header Bar */}
+            <div style={{
+              padding: '16px 24px',
+              borderBottom: '1px solid #F3F4F6',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              backgroundColor: '#FFFFFF'
+            }}>
+              {/* Doctor Info (Clickable to open profile) */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileShowChat(false);
+                    if (onSelectConversation) onSelectConversation(null);
+                  }}
+                  className="messages-mobile-back-btn"
+                  title="Back to all conversations"
+                >
+                  <ArrowLeft size={18} />
+                  <span>Chats</span>
+                </button>
+
+                <div
+                  onClick={() => onOpenDoctorProfile && onOpenDoctorProfile(currentDoctor, true)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '14px', cursor: 'pointer' }}
+                  title={`View ${currentDoctor.name}'s Profile`}
+                >
+                  <div style={{ position: 'relative', width: '46px', height: '46px', flexShrink: 0 }}>
+                    <Avatar
+                      src={currentDoctor.avatar}
+                      name={currentDoctor.name}
+                      size={46}
+                      fontSize={18}
+                    />
+                    <span style={{
+                      position: 'absolute',
+                      bottom: 0,
+                      right: 0,
+                      width: '11px',
+                      height: '11px',
+                      borderRadius: '50%',
+                      backgroundColor: currentDoctor.active ? '#10B981' : '#9CA3AF',
+                      border: '2px solid #FFFFFF'
+                    }} />
+                  </div>
+
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <h3 style={{
+                        margin: 0,
+                        fontSize: '16.5px',
+                        fontWeight: 700,
+                        color: '#111827',
+                        transition: 'color 0.15s ease'
+                      }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = '#003822'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = '#111827'; }}
+                      >
+                        {currentDoctor.name}
+                      </h3>
+                      <span style={{
+                        width: '8px',
+                        height: '8px',
+                        borderRadius: '50%',
+                        backgroundColor: currentDoctor.active ? '#10B981' : '#9CA3AF',
+                        display: 'inline-block'
+                      }} />
+                    </div>
+                    <p style={{
+                      margin: '2px 0 0 0',
+                      fontSize: '12px',
+                      color: currentDoctor.active ? '#059669' : '#6B7280',
+                      fontWeight: 600
+                    }}>
+                      {currentDoctor.specialty || 'Veterinary Practitioner'} · {currentDoctor.active ? 'Active Now' : 'Inactive'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Header Action: Profile Button */}
+              <button
+                type="button"
+                onClick={() => onOpenDoctorProfile && onOpenDoctorProfile(currentDoctor, true)}
+                style={{
+                  backgroundColor: '#FFFFFF',
+                  color: '#003822',
+                  border: '1.5px solid #003822',
+                  borderRadius: '9999px',
+                  padding: '7px 20px',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  transition: 'all 0.15s ease',
+                  boxShadow: '0 1px 3px rgba(0, 56, 34, 0.08)'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#F0FDF4';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#FFFFFF';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }}
+                title={`View ${currentDoctor.name}'s Profile`}
+              >
+                <User size={15} color="#003822" />
+                <span>Profile</span>
+              </button>
+            </div>
+
+            {/* Chat Messages Stream Area with Scroll Anchor and Controlled Scrolling */}
+            <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <div
+                ref={messagesContainerRef}
+                onScroll={handleScroll}
+                style={{
+                  flex: 1,
+                  padding: '16px 28px',
+                  overflowY: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '16px',
+                  backgroundColor: '#FFFFFF'
+                }}
+              >
+                {/* Verified Peer Consultation Pill Badge */}
+                <div style={{
+                  textAlign: 'center',
+                  margin: '4px auto 10px auto',
+                  padding: '7px 20px',
+                  backgroundColor: '#EDF8F2',
+                  border: '1px solid #A4DFBE',
+                  borderRadius: '9999px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: '#0B6B3F',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 1px 4px rgba(11, 107, 63, 0.04)'
+                }}>
+                  <ShieldCheck size={15} color="#0B7A48" />
+                  <span>Verified Peer Consultation · Direct Doctor-to-Doctor Messaging</span>
+                </div>
+
+                {/* Message Stream */}
+                {chatMessages.map((msg, idx) => {
+                  const isMe = msg.sender === 'user' || msg.sender === 'me' || msg.senderId === (currentUser?.id || 1);
+                  // Determine if this is the last message sent by me in this conversation
+                  const isLastSentByMe = isMe && (chatMessages.slice(idx + 1).every(m => m.sender !== 'user' && m.sender !== 'me' && m.senderId !== (currentUser?.id || 1)));
+
+                  const isSeen = msg.status === 'SEEN' || msg.isRead === true;
+                  const isDelivered = !isSeen && msg.status === 'DELIVERED';
+
+                  let statusTooltip = 'Sent successfully';
+                  if (isSeen) {
+                    statusTooltip = `Seen${msg.readAt ? ` at ${formatTime(msg.readAt)}` : ''}`;
+                  } else if (isDelivered) {
+                    statusTooltip = `Delivered${msg.deliveredAt ? ` at ${formatTime(msg.deliveredAt)}` : ''} · Unseen`;
+                  } else {
+                    statusTooltip = 'Sent · Unseen';
+                  }
+
+                  // Date divider calculation
+                  const prevMsg = idx > 0 ? chatMessages[idx - 1] : null;
+                  const currentRawDate = parseUtcDate(msg.createdAt);
+                  const prevRawDate = prevMsg?.createdAt ? parseUtcDate(prevMsg.createdAt) : null;
+                  const currentDateKey = currentRawDate ? `${currentRawDate.getFullYear()}-${currentRawDate.getMonth()}-${currentRawDate.getDate()}` : null;
+                  const prevDateKey = prevRawDate ? `${prevRawDate.getFullYear()}-${prevRawDate.getMonth()}-${prevRawDate.getDate()}` : null;
+                  const showDateDivider = currentDateKey && currentDateKey !== prevDateKey;
+                  const dateDividerLabel = showDateDivider ? formatDateDivider(msg.createdAt) : null;
+
+                  return (
+                    <React.Fragment key={`chat-msg-wrap-${msg.id || msg.tempId || idx}`}>
+                      {showDateDivider && dateDividerLabel && (
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          margin: '16px 0 10px 0'
+                        }}>
+                          <span style={{
+                            backgroundColor: '#F3F4F6',
+                            color: '#4B5563',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            padding: '3px 14px',
+                            borderRadius: '12px',
+                            border: '1px solid #E5E7EB',
+                            letterSpacing: '0.03em',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+                          }}>
+                            {dateDividerLabel}
+                          </span>
+                        </div>
+                      )}
+                      <div key={`chat-msg-${msg.id || msg.tempId || idx}`} style={{ display: 'flex', flexDirection: 'column' }}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: isMe ? 'flex-end' : 'flex-start',
+                            alignItems: 'flex-start',
+                            gap: '10px',
+                            maxWidth: '100%'
+                          }}
+                        >
+                          {/* Doctor Avatar on the left for received messages */}
+                          {!isMe && (
+                            <div style={{ position: 'relative', flexShrink: 0, marginTop: '2px' }}>
+                              <Avatar
+                                src={currentDoctor.avatar}
+                                name={currentDoctor.name}
+                                size={34}
+                                fontSize={13}
+                              />
+                              <span style={{
+                                position: 'absolute',
+                                bottom: 0,
+                                right: 0,
+                                width: '9px',
+                                height: '9px',
+                                borderRadius: '50%',
+                                backgroundColor: '#10B981',
+                                border: '1.5px solid #FFFFFF'
+                              }} />
+                            </div>
+                          )}
+
+                          {/* Message Bubble */}
+                          {(() => {
+                            const storyParsed = parseStoryMessage(msg.text);
+
+                            return (
+                              <div style={{
+                                maxWidth: isMe ? '72%' : '76%',
+                                backgroundColor: isMe ? '#0D4B2D' : '#F8FAF9',
+                                color: isMe ? '#FFFFFF' : '#1F2937',
+                                borderRadius: isMe ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
+                                padding: storyParsed ? '12px 14px 10px 14px' : '13px 20px',
+                                border: isMe ? 'none' : '1px solid #ECEFEF',
+                                boxShadow: isMe ? '0 2px 8px rgba(13, 75, 45, 0.12)' : '0 1px 3px rgba(0,0,0,0.02)'
+                              }}>
+                                {storyParsed ? (
+                                  <StoryDirectMessage
+                                    parsed={storyParsed}
+                                    attachmentUrl={msg.attachmentUrl}
+                                    attachmentType={msg.attachmentType}
+                                    isMe={isMe}
+                                    onOpenStory={onOpenStory}
+                                    stories={stories}
+                                    currentDoctor={currentDoctor}
+                                    currentUser={currentUser}
+                                    msg={msg}
+                                  />
+                                ) : (
+                                  <>
+                                    {/* Attached Media (Image or Video) */}
+                                    {msg.attachmentUrl && (
+                                      <ChatMessageMedia url={msg.attachmentUrl} type={msg.attachmentType} />
+                                    )}
+
+                                    {msg.text && (
+                                      <p style={{
+                                        margin: 0,
+                                        fontSize: '13.5px',
+                                        lineHeight: 1.5,
+                                        whiteSpace: 'pre-wrap',
+                                        wordBreak: 'break-word'
+                                      }}>
+                                        {msg.text}
+                                      </p>
+                                    )}
+                                  </>
+                                )}
+
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'flex-end',
+                                  gap: '4px',
+                                  marginTop: '5px',
+                                  fontSize: '10.5px',
+                                  color: isMe ? 'rgba(255, 255, 255, 0.75)' : '#9CA3AF'
+                                }}>
+                                  <span>{formatTime(msg.time || msg.createdAt)}</span>
+                                  {isMe && (
+                                    <span
+                                      title={statusTooltip}
+                                      style={{ display: 'inline-flex', alignItems: 'center', marginLeft: '2px' }}
+                                    >
+                                      {isSeen ? (
+                                        <CheckCheck
+                                          size={14}
+                                          color="#38BDF8"
+                                          strokeWidth={2.5}
+                                          style={{ filter: 'drop-shadow(0 0 1px rgba(56, 189, 248, 0.5))' }}
+                                        />
+                                      ) : isDelivered ? (
+                                        <CheckCheck
+                                          size={13}
+                                          color="rgba(255, 255, 255, 0.85)"
+                                          strokeWidth={2}
+                                        />
+                                      ) : (
+                                        <Check
+                                          size={13}
+                                          color="rgba(255, 255, 255, 0.65)"
+                                          strokeWidth={2}
+                                        />
+                                      )}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+
+                        {/* Seen / Delivered status beneath the last sent message */}
+                        {isLastSentByMe && (
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'flex-end',
+                            gap: '4px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            marginTop: '4px',
+                            paddingRight: '6px'
+                          }}>
+                            {isSeen ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#0284C7' }}>
+                                <CheckCheck size={13} color="#0284C7" strokeWidth={2.4} />
+                                <span>Seen{msg.readAt ? ` · ${formatTime(msg.readAt)}` : ''}</span>
+                              </div>
+                            ) : isDelivered ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#64748B' }}>
+                                <CheckCheck size={13} color="#64748B" strokeWidth={2} />
+                                <span>Delivered · Unseen</span>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#94A3B8' }}>
+                                <Check size={13} color="#94A3B8" strokeWidth={2} />
+                                <span>Sent · Unseen</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Floating Jump-to-Bottom / New Message Badge */}
+              {showScrollBottomBtn && (
+                <button
+                  type="button"
+                  onClick={() => scrollToBottom('smooth')}
+                  style={{
+                    position: 'absolute',
+                    bottom: '16px',
+                    right: '24px',
+                    zIndex: 20,
+                    backgroundColor: '#003822',
+                    color: '#FFFFFF',
+                    border: '1.5px solid #2EE59D',
+                    borderRadius: '9999px',
+                    padding: newMessagesWhileScrolled > 0 ? '7px 16px' : '8px 12px',
+                    boxShadow: '0 6px 18px rgba(0, 56, 34, 0.35)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    backdropFilter: 'blur(8px)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.backgroundColor = '#064e3b';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.backgroundColor = '#003822';
+                  }}
+                  title="Scroll to latest messages"
+                >
+                  <ChevronDown size={15} color="#2EE59D" />
+                  <span>{newMessagesWhileScrolled > 0 ? `${newMessagesWhileScrolled} new message${newMessagesWhileScrolled > 1 ? 's' : ''}` : 'Latest messages'}</span>
+                </button>
+              )}
+            </div>
+
+            {/* Bottom Controls: Gated strictly by connection */}
+            {isPeerConnected ? (
+              <>
+                {/* Quick Consultation Prompt Chips */}
+                <div style={{
+                  padding: '6px 24px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  overflowX: 'auto',
+                  backgroundColor: '#FFFFFF',
+                  borderTop: '1px solid #F9FAFB'
+                }}>
+                  {quickPrompts.map((prompt, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setMessageText(prompt)}
+                      style={{
+                        backgroundColor: '#FFFFFF',
+                        border: '1px solid #E5E7EB',
+                        borderRadius: '9999px',
+                        padding: '7px 16px',
+                        fontSize: '11.5px',
+                        color: '#4B5563',
+                        whiteSpace: 'nowrap',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        flexShrink: 0
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = '#10B981';
+                        e.currentTarget.style.backgroundColor = '#F0FDF4';
+                        e.currentTarget.style.color = '#065F46';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = '#E5E7EB';
+                        e.currentTarget.style.backgroundColor = '#FFFFFF';
+                        e.currentTarget.style.color = '#4B5563';
+                      }}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Attachment preview if image or video chosen */}
+                {attachmentUrl && (
+                  <div style={{
+                    margin: '4px 24px',
+                    padding: '8px 14px',
+                    backgroundColor: '#ECFDF5',
+                    border: '1px solid #A7F3D0',
+                    borderRadius: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {attachmentType === 'VIDEO' ? (
+                        <Video size={16} color="#059669" />
+                      ) : (
+                        <ImageIcon size={16} color="#059669" />
+                      )}
+                      <span style={{ fontSize: '12px', fontWeight: 600, color: '#065F46' }}>
+                        {attachmentType === 'VIDEO' ? 'Clinical video clip attached' : 'Clinical image attached'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setAttachmentUrl(''); setAttachmentType('IMAGE'); }}
+                      style={{ background: 'none', border: 'none', color: '#DC2626', cursor: 'pointer' }}
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                )}
+
+                {/* Bottom Message Input Bar */}
+                <form onSubmit={handleSend} style={{
+                  padding: '12px 24px 20px 24px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  backgroundColor: '#FFFFFF'
+                }}>
+                  {/* File Input */}
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    accept="image/*,video/*"
+                    style={{ display: 'none' }}
+                  />
+
+                  {/* Attachment Paperclip Button */}
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    title="Attach Radiograph, Scan, Photo or Video Clip"
+                    style={{
+                      width: '42px',
+                      height: '42px',
+                      borderRadius: '50%',
+                      backgroundColor: '#FFFFFF',
+                      border: '1px solid #E5E7EB',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#4B5563',
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                      transition: 'all 0.15s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = '#0D4B2D';
+                      e.currentTarget.style.color = '#0D4B2D';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = '#E5E7EB';
+                      e.currentTarget.style.color = '#4B5563';
+                    }}
+                  >
+                    <Paperclip size={18} style={{ transform: 'rotate(-45deg)' }} />
+                  </button>
+
+                  {/* Message Input Field */}
+                  <input
+                    type="text"
+                    placeholder={`Message ${currentDoctor?.name || 'Doctor'}...`}
+                    value={messageText}
+                    onChange={(e) => setMessageText(e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '13px 22px',
+                      borderRadius: '9999px',
+                      border: '1px solid #E5E7EB',
+                      backgroundColor: '#F9FAFB',
+                      fontSize: '13.5px',
+                      color: '#111827',
+                      outline: 'none',
+                      transition: 'border-color 0.15s ease, background-color 0.15s ease'
+                    }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = '#0D4B2D';
+                      e.currentTarget.style.backgroundColor = '#FFFFFF';
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = '#E5E7EB';
+                      e.currentTarget.style.backgroundColor = '#F9FAFB';
+                    }}
+                  />
+
+                  {/* Send Circular Button */}
+                  <button
+                    type="submit"
+                    disabled={(!messageText.trim() && !attachmentUrl) || isSending}
+                    style={{
+                      width: '44px',
+                      height: '44px',
+                      borderRadius: '50%',
+                      backgroundColor: ((!messageText.trim() && !attachmentUrl) || isSending) ? '#E5E7EB' : '#0D4B2D',
+                      color: ((!messageText.trim() && !attachmentUrl) || isSending) ? '#9CA3AF' : '#FFFFFF',
+                      border: 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: (!messageText.trim() && !attachmentUrl) ? 'default' : 'pointer',
+                      flexShrink: 0,
+                      transition: 'all 0.15s ease',
+                      boxShadow: (!messageText.trim() && !attachmentUrl) ? 'none' : '0 4px 12px rgba(13, 75, 45, 0.25)'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (messageText.trim() || attachmentUrl) {
+                        e.currentTarget.style.backgroundColor = '#083B24';
+                        e.currentTarget.style.transform = 'scale(1.04)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (messageText.trim() || attachmentUrl) {
+                        e.currentTarget.style.backgroundColor = '#0D4B2D';
+                        e.currentTarget.style.transform = 'scale(1)';
+                      }
+                    }}
+                  >
+                    <Send size={17} style={{ marginLeft: '2px' }} />
+                  </button>
+                </form>
+              </>
+            ) : (
+              <div style={{
+                padding: '24px 20px',
+                backgroundColor: '#FAFAFA',
+                borderTop: '1px solid #E5E7EB',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                textAlign: 'center',
+                gap: '8px'
+              }}>
+                <div style={{
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '50%',
+                  backgroundColor: '#FEF3C7',
+                  color: '#D97706',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Lock size={20} />
+                </div>
+                <h4 style={{ margin: 0, fontSize: '14.5px', fontWeight: 700, color: '#111827' }}>
+                  Connect to Message {currentDoctor?.name || 'Doctor'}
+                </h4>
+                <p style={{ margin: 0, fontSize: '12.5px', color: '#6B7280', maxWidth: '380px', lineHeight: 1.4 }}>
+                  To ensure clinical privacy and mutual professional consent, you can only message peers after connecting with them.
+                </p>
+                {onSendRequest && currentDoctor && (
+                  <button
+                    type="button"
+                    onClick={() => onSendRequest(currentDoctor)}
+                    style={{
+                      marginTop: '6px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      backgroundColor: '#003822',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      borderRadius: '9999px',
+                      padding: '8px 20px',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 6px rgba(0, 56, 34, 0.2)'
+                    }}
+                  >
+                    <UserPlus size={15} />
+                    <span>Connect with Doctor</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '100%',
+            padding: '40px',
+            textAlign: 'center'
+          }}>
+            <div style={{
+              width: '64px',
+              height: '64px',
+              borderRadius: '50%',
+              backgroundColor: '#EDF8F2',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: '16px'
+            }}>
+              <MessageSquare size={28} color="#0D4B2D" />
+            </div>
+            <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: 700, color: '#111827' }}>
+              Start a Peer Consultation
+            </h3>
+            <p style={{ margin: '0 0 20px 0', fontSize: '13.5px', color: '#6B7280', maxWidth: '400px', lineHeight: 1.5 }}>
+              Select a colleague from Connected People on the right to start messaging, or explore the network to find veterinary specialists.
+            </p>
+            {onNavigateTab && (
+              <button
+                onClick={() => onNavigateTab('network')}
+                style={{
+                  backgroundColor: '#003822',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  borderRadius: '9999px',
+                  padding: '10px 24px',
+                  fontSize: '13.5px',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Find Veterinary Doctors
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ======================================================== */}
+      {/* 2. RIGHT: CONNECTED PEOPLE SIDEBAR                       */}
+      {/* ======================================================== */}
+      <aside
+        className="messages-contacts-pane"
+        style={{
+          width: '340px',
+          minWidth: '340px',
+          backgroundColor: '#FFFFFF',
+          borderRadius: '24px',
+          boxShadow: '0 4px 20px rgba(0, 45, 25, 0.04)',
+          border: '1px solid #E5E7EB',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '22px 20px',
+          boxSizing: 'border-box'
+        }}
+      >
+        {/* Header: Direct Messages + count badge */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '16px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <MessageSquare size={19} color="#0D4B2D" strokeWidth={2.2} />
+            <h3 style={{
+              margin: 0,
+              fontSize: '16px',
+              fontWeight: 700,
+              color: '#111827'
+            }}>
+              Direct Messages
+            </h3>
+          </div>
+
+          <span style={{
+            backgroundColor: '#003822',
+            color: '#FFFFFF',
+            fontSize: '11px',
+            fontWeight: 700,
+            borderRadius: '9999px',
+            padding: '4px 12px'
+          }}>
+            {filteredContacts.length} chats
+          </span>
+        </div>
+
+        {/* Search People Input */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          backgroundColor: '#F9FAFB',
+          border: '1px solid #E5E7EB',
+          borderRadius: '9999px',
+          padding: '8px 14px',
+          marginBottom: '16px'
+        }}>
+          <Search size={14} color="#9CA3AF" />
+          <input
+            type="text"
+            placeholder="Search chats or doctors..."
+            value={searchPersonQuery}
+            onChange={(e) => setSearchPersonQuery(e.target.value)}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              outline: 'none',
+              width: '100%',
+              paddingLeft: '8px',
+              fontSize: '12.5px',
+              color: '#111827'
+            }}
+          />
+        </div>
+
+        {/* Direct Messages & Contacts List */}
+        <div style={{
+          flex: 1,
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '6px'
+        }}>
+          {filteredContacts.length > 0 ? (
+            filteredContacts.map(({ doctor: person, conv: existing, lastMessage, timestamp, unread }, idx) => {
+              const isSelected = currentDoctor?.id === person.id || currentDoctor?.name === person.name;
+              const isUnread = unread > 0 && !isSelected;
+
+              return (
+                <div
+                  key={`contact-item-${person.id || person.name || idx}`}
+                  onClick={() => {
+                    setMobileShowChat(true);
+                    if (onSelectConversation) {
+                      if (existing) {
+                        onSelectConversation({ ...existing, doctor: person, unread: 0 });
+                      } else {
+                        onSelectConversation({
+                          id: `chat-${person.id || Date.now()}`,
+                          doctor: person,
+                          lastMessage: 'Started new direct consultation.',
+                          timestamp: 'Just now',
+                          unread: 0,
+                          messages: []
+                        });
+                      }
+                    }
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '10px 12px',
+                    borderRadius: '14px',
+                    cursor: 'pointer',
+                    backgroundColor: isSelected ? '#EDF8F2' : (isUnread ? '#F0FDF4' : 'transparent'),
+                    border: isSelected ? '1px solid #A4DFBE' : (isUnread ? '1px solid #BBF7D0' : '1px solid transparent'),
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isSelected) e.currentTarget.style.backgroundColor = isUnread ? '#DCFCE7' : '#F9FAFB';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isSelected) e.currentTarget.style.backgroundColor = isUnread ? '#F0FDF4' : 'transparent';
+                  }}
+                >
+                  {/* Avatar and Info */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                    <div style={{ position: 'relative', flexShrink: 0 }}>
+                      <Avatar
+                        src={person.avatar}
+                        name={person.name}
+                        size={40}
+                        fontSize={16}
+                      />
+                      <span style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        right: 0,
+                        width: '9px',
+                        height: '9px',
+                        borderRadius: '50%',
+                        backgroundColor: person.active ? '#10B981' : '#9CA3AF',
+                        border: '1.5px solid #FFFFFF'
+                      }} />
+                    </div>
+
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h4 style={{
+                          margin: 0,
+                          fontSize: '13px',
+                          fontWeight: isUnread ? 800 : 700,
+                          color: isUnread ? '#065F46' : '#111827',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {person.name}
+                        </h4>
+                        <span style={{
+                          fontSize: '10.5px',
+                          color: isUnread ? '#059669' : '#9CA3AF',
+                          fontWeight: isUnread ? 700 : 400,
+                          flexShrink: 0,
+                          marginLeft: '4px'
+                        }}>
+                          {timestamp}
+                        </span>
+                      </div>
+
+                      <p style={{
+                        margin: '1px 0 0 0',
+                        fontSize: '11px',
+                        color: isUnread ? '#065F46' : '#6B7280',
+                        fontWeight: isUnread ? 700 : 400,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}>
+                        {existing?.messages && existing.messages.length > 0 && (
+                          (() => {
+                            const lastM = existing.messages[existing.messages.length - 1];
+                            const isMeMsg = lastM.sender === 'user' || lastM.sender === 'me' || lastM.senderId === (currentUser?.id || 1);
+                            if (!isMeMsg) return null;
+                            const isSeenM = lastM.status === 'SEEN' || lastM.isRead;
+                            const isDelivM = lastM.status === 'DELIVERED';
+                            if (isSeenM) return <CheckCheck size={12} color="#0284C7" strokeWidth={2.4} style={{ flexShrink: 0 }} />;
+                            if (isDelivM) return <CheckCheck size={12} color="#64748B" strokeWidth={2} style={{ flexShrink: 0 }} />;
+                            return <Check size={12} color="#94A3B8" strokeWidth={2} style={{ flexShrink: 0 }} />;
+                          })()
+                        )}
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {lastMessage}
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Unread Badge / Activity Dot */}
+                  {isUnread ? (
+                    <span style={{
+                      backgroundColor: '#059669',
+                      color: '#FFFFFF',
+                      fontSize: '10.5px',
+                      fontWeight: 700,
+                      borderRadius: '9999px',
+                      minWidth: '18px',
+                      height: '18px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '0 5px',
+                      boxShadow: '0 2px 6px rgba(5, 150, 105, 0.35)',
+                      flexShrink: 0,
+                      marginLeft: '8px'
+                    }}>
+                      {unread}
+                    </span>
+                  ) : (
+                    <ChevronRight size={15} color="#9CA3AF" style={{ flexShrink: 0, marginLeft: '6px' }} />
+                  )}
+                </div>
+              );
+            })
+          ) : (
+            <div style={{
+              padding: '24px 12px',
+              textAlign: 'center',
+              color: '#6B7280'
+            }}>
+              <p style={{ margin: '0 0 10px 0', fontSize: '12.5px' }}>
+                {searchPersonQuery ? `No chats matching "${searchPersonQuery}"` : 'No messages or connected colleagues yet.'}
+              </p>
+              {onNavigateTab && !searchPersonQuery && (
+                <button
+                  onClick={() => onNavigateTab('network')}
+                  style={{
+                    backgroundColor: '#EDF8F2',
+                    color: '#0D4B2D',
+                    border: '1px solid #A4DFBE',
+                    borderRadius: '9999px',
+                    padding: '6px 14px',
+                    fontSize: '11.5px',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Explore Vet Network
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </aside>
+    </div>
+  );
+}

@@ -1,0 +1,43 @@
+groups:
+  - name: zenve_alerts
+    rules:
+      # Alert: High Error Rate (HTTP 5xx > 5% over 2 minutes)
+      - alert: HighHttpErrorRate
+        expr: (sum(rate(zenve_gateway_requests_by_status{status=~"5.."}[2m])) / sum(rate(zenve_gateway_requests_total[2m]))) * 100 > 5
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High HTTP 5xx error rate detected on Zenve Gateway"
+          description: "HTTP 5xx failure rate is {{ $value }}%, exceeding the 5% SLA threshold."
+
+      # Alert: Circuit Breaker Tripped OPEN
+      - alert: CircuitBreakerTripped
+        expr: zenve_circuit_breaker_state == 2
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Upstream Node Circuit Breaker is OPEN"
+          description: "Circuit breaker for {{ $labels.node }} is OPEN due to repeated failures."
+
+      # Alert: High API Latency (p95 > 1000ms)
+      - alert: HighApiLatency
+        expr: zenve_gateway_request_duration_ms{quantile="0.95"} > 1000
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated 95th Percentile API Latency"
+          description: "p95 request latency is {{ $value }}ms (exceeds 1000ms threshold)."
+
+      # Alert: Rate Limit Spikes / Potential DDoS
+      - alert: ExcessiveRateLimitBreaches
+        expr: rate(zenve_gateway_ratelimit_rejections_total[2m]) > 50
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sudden surge in rate limit rejections"
+          description: "Gateway rejected over 50 requests/sec due to rate limits."
+

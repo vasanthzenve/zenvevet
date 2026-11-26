@@ -1,0 +1,71 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: zenve-backend-network-policy
+  namespace: zenve-vet
+spec:
+  podSelector:
+    matchLabels:
+      app: zenve-vet-backend
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow traffic from Nginx Ingress Controller and Frontend
+  - from:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: ingress-nginx
+    - podSelector:
+        matchLabels:
+          app: zenve-vet-frontend
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  # Allow egress to MySQL, Redis, and DNS
+  - to:
+    - podSelector:
+        matchLabels:
+          app: mysql
+    ports:
+    - protocol: TCP
+      port: 3306
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: UDP
+      port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: zenve-database-network-policy
+  namespace: zenve-vet
+spec:
+  podSelector:
+    matchLabels:
+      app: mysql
+  policyTypes:
+  - Ingress
+  ingress:
+  # Only backend pods and worker pods may connect to MySQL on port 3306
+  - from:
+    - podSelector:
+        matchLabels:
+          app: zenve-vet-backend
+    - podSelector:
+        matchLabels:
+          app: zenve-vet-worker
+    ports:
+    - protocol: TCP
+      port: 3306
+

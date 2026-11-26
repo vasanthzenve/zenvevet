@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zenve-vet-backend
+  namespace: zenve-vet
+  labels:
+    app: zenve-vet-backend
+spec:
+  replicas: 4
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: zenve-vet-backend
+  template:
+    metadata:
+      labels:
+        app: zenve-vet-backend
+    spec:
+      containers:
+      - name: backend
+        image: zenve-vet-backend:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: zenve-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: zenve-config
+              key: DB_PORT
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: zenve-config
+              key: DB_NAME
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: zenve-config
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: zenve-secrets
+              key: db-password
+        - name: SPRING_DATA_REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: zenve-config
+              key: REDIS_HOST
+        - name: SPRING_DATA_REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: zenve-config
+              key: REDIS_PORT
+        - name: SPRING_CACHE_TYPE
+          valueFrom:
+            configMapKeyRef:
+              name: zenve-config
+              key: SPRING_CACHE_TYPE
+        - name: TOMCAT_MAX_THREADS
+          valueFrom:
+            configMapKeyRef:
+              name: zenve-config
+              key: TOMCAT_MAX_THREADS
+        - name: HIKARI_MAX_POOL_SIZE
+          valueFrom:
+            configMapKeyRef:
+              name: zenve-config
+              key: HIKARI_MAX_POOL_SIZE
+        resources:
+          requests:
+            cpu: "1000m"
+            memory: "2048Mi"
+          limits:
+            cpu: "2500m"
+            memory: "4096Mi"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 40
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 25
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zenve-vet-backend-svc
+  namespace: zenve-vet
+  labels:
+    app: zenve-vet-backend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http
+  selector:
+    app: zenve-vet-backend
+

@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zenve-vet
+  labels:
+    name: zenve-vet
+    app.kubernetes.io/part-of: zenve-vet-platform
+

@@ -1,0 +1,106 @@
+PROJECT IMPLEMENTATION REPORT
+Name: Pet Grammar and Punctuation Checker
+Report file: Implrmentation.txt
+
+1. PROJECT PURPOSE
+------------------
+This project is a Flask-based web application that checks and improves English text.
+The main focus is pet-related writing, including dogs, cats, puppies, kittens, rabbits,
+hamsters, parrots, feeding, walking, grooming, veterinary care, and other pet topics.
+
+2. TECHNOLOGIES IMPLEMENTED
+---------------------------
+- Python and Flask for the web server and routes.
+- Flask templates with HTML, CSS, and JavaScript for the user interface.
+- Ollama llama3.2:1b for local, AI-powered main text correction.
+- Ollama REST API running at http://127.0.0.1:11434/api/generate.
+- spaCy en_core_web_sm for NLP tokenization and text analysis.
+- LanguageTool for English grammar and correction support.
+- PySpellChecker for spelling candidate detection.
+- Python difflib for close pet-word matching.
+- Regular expressions for punctuation and capitalization normalization.
+- Windows Ollama installation through winget.
+
+3. FEATURES IMPLEMENTED
+-----------------------
+- A web page for entering text.
+- A POST route that processes submitted text.
+- Main grammar, spelling, and punctuation correction through Ollama.
+- A second LanguageTool correction pass.
+- Automatic spacing after commas and other punctuation marks.
+- Capitalization of the beginning of sentences.
+- Repeated-punctuation cleanup.
+- A pet-specific spelling dictionary for common misspellings.
+- Corrections for words such as kitten, puppy, rabbit, hamster, parrot, guinea pig,
+  turtle, fish, cat, and dog.
+- spaCy tokenization of the corrected text.
+- Detection of likely misspellings and presentation of replacement suggestions.
+- Context-based "Suggested Next Words" for the end of a sentence.
+- Clickable next-word suggestions that append words to the input field.
+- Ollama failure handling with LanguageTool and local normalization as fallbacks.
+- A dark Bootstrap interface with text input and corrected output sections.
+
+4. APPLICATION FLOW
+-------------------
+1. The user enters text in the textarea.
+2. The Flask /spell route receives the text.
+3. Known pet misspellings are corrected locally.
+4. Punctuation and capitalization are normalized.
+5. Ollama llama3.2:1b performs the primary grammar and spell correction.
+6. LanguageTool performs an additional grammar pass.
+7. Pet-word corrections are applied again.
+8. spaCy tokenizes and analyzes the final text.
+9. Word and next-word suggestions are generated.
+10. The corrected text and suggestions are shown on the web page.
+
+5. ACCURACY TEST METHOD
+-----------------------
+An initial local accuracy test used 8 small pet-related sentences with manually
+defined expected results. Each test measured exact corrected-text output after the
+Ollama, pet-word, punctuation, and LanguageTool pipeline. The test did not use a
+large public benchmark and should therefore be treated as a small functional sample,
+not a comprehensive NLP benchmark.
+
+Test categories included:
+- Kitten and rabbit spelling.
+- Dog spelling and loose-collar correction.
+- Hamster spelling.
+- Puppy spelling.
+- Cat spelling.
+- Rabbit and plural spelling.
+- Everyday dog walking language.
+- Parrot behavior and extra-word handling.
+
+6. MEASURED ACCURACY
+--------------------
+Exact-match accuracy: 4 out of 8 = 50%.
+
+The exact-match score requires the complete output string to match the manually
+expected sentence exactly, including punctuation and added or removed words.
+Several outputs were close but differed in punctuation style or optional wording.
+
+Observed performance:
+- Pet-word corrections worked in many common examples.
+- Standard grammar corrections were generally successful.
+- Ollama was the most accurate component for sentence-level context.
+- Small local models can still introduce extra words or alter word forms.
+- The application uses post-processing and fallbacks to reduce these errors.
+
+7. ACCURACY IMPROVEMENT MADE
+----------------------------
+The Ollama prompt was strengthened to:
+- Correct only the given text.
+- Avoid explanations.
+- Preserve the original meaning.
+- Avoid adding or removing words.
+- Avoid changing singular or plural forms unless clearly necessary.
+- Return only the corrected text.
+
+8. HOW TO RUN
+-------------
+1. Start Ollama.
+2. Ensure llama3.2:1b is installed.
+3. Run: py -3 app.py
+4. Open: http://127.0.0.1:5000/
+
+End of implementation report.
